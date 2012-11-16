@@ -1,0 +1,78 @@
+#!/usr/bin/python
+# vim: tabstop=4 shiftwidth=4 softtabstop=4
+
+#    ad-sshkeys 
+#    Copyright (C) GridDynamics Openstack Core Team, GridDynamics
+#
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU Lesser General Public License as published by
+#    the Free Software Foundation, either version 2.1 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU Lesser General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+
+
+import json
+import sqlalchemy.engine
+from flask import Flask, request, abort
+from itertools import repeat
+from nova import flags
+from openstackclient_base.client_set import ClientSet
+
+USERNAME = "altai_administrator"
+PASSWD   = "`qaz2WSX"
+AUTH_URI = "http://localhost:5000/v2.0"
+
+
+
+app = Flask(__name__)
+#FIXME - do it without hack
+app.logger.handlers[0].formatter._fmt='%(asctime)s %(levelname)-8s %(message)s'
+flags.FLAGS(['', '--flagfile=/etc/nova/nova.conf'])
+
+app.logger.info('Started')
+app.conn = sqlalchemy.engine.create_engine(flags.FLAGS.sql_connection, 
+    pool_recycle=flags.FLAGS.sql_idle_timeout, echo=False)
+app.cs   = ClientSet(username=USERNAME, password=PASSWD, 
+    tenant_name="systenant", auth_uri=AUTH_URI)
+
+@app.route('/')
+def api_root():
+    # FIXME
+    systenant = app.cs.identity_admin.tenants.find(name="systenant")
+    adgroups = set(getattr(systenant, 'groups', []))
+    adusers  = set(getattr(systenant, 'users',  []))
+    ip = request.environ['REMOTE_ADDR']
+    # FIXME write nova extension 
+    user_id = app.conn.execute("""select user_id 
+	from instances i join fixed_ips f on (f.instance_id=i.id) 
+	where f.address=%s""", ip).scalar()
+    if not user_id:
+	app.logger.error('ip %s: instance not found', ip)
+	abort(404)
+    app.logger.info('ip %s: owner %s', ip, user_id)
+    users = dict()
+    for user in app.cs.identity_admin.users.list():
+	if user.id == user.id or user.name in adusers or set(user.memberOf & adgroups):
+	    # log user
+	    users[user.id] = { "enabled": user.enabled, "ssh_keys": [], "id": user.name }
+    # FIXME - write nova extension
+    for ssh_key in app.conn.execute("""select user_id, public_key 
+	from key_pairs
+	where user_id in (%s)""" % ", ".join(repeat("%s", len(users))), *users.keys()):
+	users[ssh_key.user_id]['ssh_keys'].append(ssh_key.public_key)
+    app.logger.info('ip %s: users %s', ip, ", ".join(users.keys()))
+    resp = json.dumps(users.values())
+    app.logger.debug('ip %s: %s', ip, resp)
+    return resp
+
+if __name__ == '__main__':
+    app.run(port=8659, host="0.0.0.0")
+
