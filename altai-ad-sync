@@ -66,8 +66,9 @@ def api_root():
     # FIXME - write nova extension
     for ssh_key in app.conn.execute("""select user_id, public_key 
 	from key_pairs
-	where user_id in (%s)""" % ", ".join(repeat("%s", len(users))), *users.keys()):
-	users[ssh_key.user_id]['ssh_keys'].append(ssh_key.public_key)
+	where deleted=0 user_id in (%s)""" % ", ".join(repeat("%s", len(users))), *users.keys()):
+	key = ssh_key.public_key if ssh_key.public_key.endswith('\n') else ssh_key.public_key + "\n"
+	users[ssh_key.user_id]['ssh_keys'].append(key)
     app.logger.info('ip %s: users %s', ip, ", ".join(users.keys()))
     resp = json.dumps(users.values())
     app.logger.debug('ip %s: %s', ip, resp)

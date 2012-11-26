@@ -81,7 +81,7 @@ for user_rec in users:
 	LOG.warn('user %s: add', user)
 	sp.call([
 	    '/usr/sbin/useradd', 
-	    '-c', COMMENT, '-G', 'wheels',
+	    '-c', COMMENT, '-G', 'wheel',
 	    '-m', '-U', 
 	    '-p', '*', 
 	    '-s', ENABLED if enabled else DISABLED,
